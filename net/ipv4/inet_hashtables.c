@@ -193,6 +193,24 @@ inet_lhash2_bucket_sk(struct inet_hashinfo *h, struct sock *sk)
 	return inet_lhash2_bucket(h, hash);
 }
 
+static struct inet_listen_hashbucket *
+inet_sharded_lhash2_bucket_sk(struct inet_sharded_hash *h, struct sock *sk)
+{
+	u32 hash;
+
+#if IS_ENABLED(CONFIG_IPV6)
+	if (sk->sk_family == AF_INET6)
+		hash = ipv6_portaddr_hash(sock_net(sk),
+					  &sk->sk_v6_rcv_saddr,
+					  inet_sk(sk)->inet_num);
+	else
+#endif
+		hash = ipv4_portaddr_hash(sock_net(sk),
+					  inet_sk(sk)->inet_rcv_saddr,
+					  inet_sk(sk)->inet_num);
+	return inet_sharded_lhash2_bucket(h, hash);
+}
+
 static void inet_hash2(struct inet_hashinfo *h, struct sock *sk)
 {
 	struct inet_listen_hashbucket *ilb2;
@@ -212,6 +230,27 @@ static void inet_hash2(struct inet_hashinfo *h, struct sock *sk)
 	ilb2->count++;
 	spin_unlock(&ilb2->lock);
 }
+
+static void inet_sharded_hash2(struct inet_sharded_hash *h, struct sock *sk)
+{
+	struct inet_listen_hashbucket *ilb2;
+
+	if (!h->lhash2)
+		return;
+
+	ilb2 = inet_sharded_lhash2_bucket_sk(h, sk);
+
+	/*spin_lock(&ilb2->lock);
+	if (sk->sk_reuseport && sk->sk_family == AF_INET6)
+		hlist_add_tail_rcu(&inet_csk(sk)->icsk_listen_portaddr_node,
+				   &ilb2->head);
+	else*/
+		hlist_add_head_rcu(&inet_csk(sk)->icsk_listen_portaddr_node,
+				   &ilb2->head);
+	ilb2->count++;
+	//spin_unlock(&ilb2->lock);
+}
+
 
 static void inet_unhash2(struct inet_hashinfo *h, struct sock *sk)
 {
@@ -255,6 +294,8 @@ static inline int compute_score(struct sock *sk, struct net *net,
  * does not allow a listening sock to specify the remote port nor the
  * remote address for the connection. So always assume those are both
  * wildcarded during the search since they can never be otherwise.
+ *
+ * No need for a shard specific version of this, as ilb2 is a sharded bucket if need be
  */
 
 /* called with rcu_read_lock() : No refcount taken on the socket */
@@ -271,11 +312,15 @@ static struct sock *inet_lhash2_lookup(struct net *net,
 	int score, hiscore = 0;
 	u32 phash = 0;
 
+	//Todo : no rcu for local, sharded CPU
 	inet_lhash2_for_each_icsk_rcu(icsk, &ilb2->head) {
 		sk = (struct sock *)icsk;
 		score = compute_score(sk, net, hnum, daddr,
 				      dif, sdif, exact_dif);
 		if (score > hiscore) {
+			/*if (sk->sk_sharded) {
+				result = sharded_select_sock(sk, skb, doff);
+			} else */
 			if (sk->sk_reuseport) {
 				phash = inet_ehashfn(net, daddr, hnum,
 						     saddr, sport);
@@ -291,6 +336,8 @@ static struct sock *inet_lhash2_lookup(struct net *net,
 
 	return result;
 }
+
+
 
 struct sock *__inet_lookup_listener(struct net *net,
 				    struct inet_hashinfo *hashinfo,
@@ -325,6 +372,44 @@ done:
 	return result;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_listener);
+
+
+struct sock *__inet_lookup_sharded_listener(struct net *net,
+				    struct inet_sharded_hash *sharded_hashinfo,
+				    struct sk_buff *skb, int doff,
+				    const __be32 saddr, __be16 sport,
+				    const __be32 daddr, const unsigned short hnum,
+				    const int dif, const int sdif)
+{
+	struct inet_listen_hashbucket *ilb2;
+	struct sock *result = NULL;
+
+	//TODO : use rss hash?
+	unsigned int hash2 = ipv4_portaddr_hash(net, daddr, hnum);
+	ilb2 = inet_sharded_lhash2_bucket(sharded_hashinfo, hash2);
+
+	//ilb2 is already sharded
+	result = inet_lhash2_lookup(net, ilb2, skb, doff,
+				    saddr, sport, daddr, hnum,
+				    dif, sdif);
+	if (result)
+		goto done;
+
+	// Lookup lhash2 with INADDR_ANY
+	hash2 = ipv4_portaddr_hash(net, htonl(INADDR_ANY), hnum);
+	ilb2 = inet_sharded_lhash2_bucket(sharded_hashinfo, hash2);
+
+	result = inet_lhash2_lookup(net, ilb2, skb, doff,
+				    saddr, sport, htonl(INADDR_ANY), hnum,
+				    dif, sdif);
+done:
+	if (unlikely(IS_ERR(result)))
+		return NULL;
+	return result;
+}
+EXPORT_SYMBOL_GPL(__inet_lookup_sharded_listener);
+
+
 
 /* All sockets share common refcount, but have different destructors */
 void sock_gen_put(struct sock *sk)
@@ -394,6 +479,55 @@ found:
 	return sk;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_established);
+
+struct sock *__inet_lookup_sharded_established(struct net *net,
+				  struct inet_sharded_hash *sharded_hash,
+				  const __be32 saddr, const __be16 sport,
+				  const __be32 daddr, const u16 hnum,
+				  const int dif, const int sdif)
+{
+	INET_ADDR_COOKIE(acookie, saddr, daddr);
+	const __portpair ports = INET_COMBINED_PORTS(sport, hnum);
+	struct sock *sk;
+	const struct hlist_nulls_node *node;
+	/* Optimize here for direct hit, only listening connections can
+	 * have wildcards anyways.
+	 */
+	unsigned int hash = inet_ehashfn(net, daddr, hnum, saddr, sport);
+	unsigned int slot = hash & sharded_hash->ehash_mask;
+	struct inet_ehash_bucket *head = &sharded_hash->ehash[slot];
+
+begin:
+	sk_nulls_for_each_rcu(sk, node, &head->chain) {
+		if (sk->sk_hash != hash)
+			continue;
+		if (likely(INET_MATCH(sk, net, acookie,
+				      saddr, daddr, ports, dif, sdif))) {
+			if (unlikely(!refcount_inc_not_zero(&sk->sk_refcnt)))
+				goto out;
+			if (unlikely(!INET_MATCH(sk, net, acookie,
+						 saddr, daddr, ports,
+						 dif, sdif))) {
+				sock_gen_put(sk);
+				goto begin;
+			}
+			goto found;
+		}
+	}
+	/*
+	 * if the nulls value we got at the end of this lookup is
+	 * not the expected one, we must restart lookup.
+	 * We probably met an item that was moved to another chain.
+	 */
+	if (get_nulls_value(node) != slot)
+		goto begin;
+out:
+	sk = NULL;
+found:
+	return sk;
+}
+EXPORT_SYMBOL_GPL(__inet_lookup_sharded_established);
+
 
 /* called with local bh disabled */
 static int __inet_check_established(struct inet_timewait_death_row *death_row,
@@ -500,6 +634,38 @@ bool inet_ehash_insert(struct sock *sk, struct sock *osk)
 	return ret;
 }
 
+
+/* insert a socket into ehash, and eventually remove another one
+ * (The another one can be a SYN_RECV or TIMEWAIT
+ * Sharded version of inet_ehash_insert
+ */
+bool inet_ehash_sharded_insert(struct sock *sk, struct sock *osk)
+{
+	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
+	struct inet_sharded_hash* sharded_hash = &sk->sk_prot->h.hashinfo->sharded[this_cpu_off];
+	struct hlist_nulls_head *list;
+	struct inet_ehash_bucket *head;
+	//spinlock_t *lock;
+	bool ret = true;
+
+	WARN_ON_ONCE(!sk_unhashed(sk));
+
+	sk->sk_hash = sk_ehashfn(sk);
+	head = inet_ehash_sharded_bucket(sharded_hash, sk->sk_hash);
+	list = &head->chain;
+	/*lock = inet_ehash_lockp(sharded_hash, sk->sk_hash);
+
+	spin_lock(lock);
+	if (osk) {
+		WARN_ON_ONCE(sk->sk_hash != osk->sk_hash);
+		ret = sk_nulls_del_node_init_rcu(osk);
+	}
+	if (ret)
+		__sk_nulls_add_node_rcu(sk, list);
+	spin_unlock(lock);*/
+	return ret;
+}
+
 bool inet_ehash_nolisten(struct sock *sk, struct sock *osk)
 {
 	bool ok = inet_ehash_insert(sk, osk);
@@ -515,6 +681,22 @@ bool inet_ehash_nolisten(struct sock *sk, struct sock *osk)
 	return ok;
 }
 EXPORT_SYMBOL_GPL(inet_ehash_nolisten);
+
+bool inet_ehash_sharded_nolisten(struct sock *sk, struct sock *osk)
+{
+	bool ok = inet_ehash_sharded_insert(sk, osk);
+
+	if (ok) {
+		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+	} else {
+		percpu_counter_inc(sk->sk_prot->orphan_count);
+		inet_sk_set_state(sk, TCP_CLOSE);
+		sock_set_flag(sk, SOCK_DEAD);
+		inet_csk_destroy_sock(sk);
+	}
+	return ok;
+}
+EXPORT_SYMBOL_GPL(inet_ehash_sharded_nolisten);
 
 static int inet_reuseport_add_sock(struct sock *sk,
 				   struct inet_listen_hashbucket *ilb)
@@ -541,43 +723,80 @@ static int inet_reuseport_add_sock(struct sock *sk,
 int __inet_hash(struct sock *sk, struct sock *osk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
+
 	struct inet_listen_hashbucket *ilb;
 	int err = 0;
 
-	if (sk->sk_state != TCP_LISTEN) {
-		inet_ehash_nolisten(sk, osk);
-		return 0;
-	}
-	WARN_ON(!sk_unhashed(sk));
-	ilb = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)];
+	if (sk->sk_sharded != -1) {
+		printk("COOL : calling inet_hash on a sharded socket");
+		dump_stack();
+		if (sk->sk_state != TCP_LISTEN) {
+			inet_ehash_sharded_nolisten(sk, osk);
+			return 0;
+		}
+		WARN_ON(!sk_unhashed(sk));
+			//We keep a unique listening_hash. Indeed it's not used in the fast path.
+			ilb = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)];
+			struct inet_sharded_hash *sharded_hash = &sk->sk_prot->h.hashinfo->sharded[sk->sk_sharded];
 
-	spin_lock(&ilb->lock);
-	if (sk->sk_reuseport) {
-		err = inet_reuseport_add_sock(sk, ilb);
-		if (err)
-			goto unlock;
-	}
-	if (IS_ENABLED(CONFIG_IPV6) && sk->sk_reuseport &&
-		sk->sk_family == AF_INET6)
-		hlist_add_tail_rcu(&sk->sk_node, &ilb->head);
-	else
-		hlist_add_head_rcu(&sk->sk_node, &ilb->head);
-	inet_hash2(hashinfo, sk);
-	ilb->count++;
-	sock_set_flag(sk, SOCK_RCU_FREE);
-	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
-unlock:
-	spin_unlock(&ilb->lock);
+			//Yeah !
+			//spin_lock(&ilb->lock);
 
+			if (sk->sk_reuseport) {
+				printk("BUG : REUSEPORT IS NOT ALLOWED WITH SHARDED");
+			}
+			if (IS_ENABLED(CONFIG_IPV6) && sk->sk_reuseport &&
+				sk->sk_family == AF_INET6) {
+				printk("BUG : SHARDED does not support IPv6!");
+			} else
+				hlist_add_head_rcu(&sk->sk_node, &ilb->head);
+			inet_sharded_hash2(sharded_hash, sk);
+			ilb->count++;
+			sock_set_flag(sk, SOCK_RCU_FREE);
+			sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+			//Re-yeah!
+			spin_unlock(&ilb->lock);
+
+	} else {
+
+		if (sk->sk_state != TCP_LISTEN) {
+			inet_ehash_nolisten(sk, osk);
+			return 0;
+		}
+		WARN_ON(!sk_unhashed(sk));
+		ilb = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)];
+
+		spin_lock(&ilb->lock);
+		if (sk->sk_reuseport) {
+			err = inet_reuseport_add_sock(sk, ilb);
+			if (err)
+				goto unlock;
+		}
+		if (IS_ENABLED(CONFIG_IPV6) && sk->sk_reuseport &&
+			sk->sk_family == AF_INET6)
+			hlist_add_tail_rcu(&sk->sk_node, &ilb->head);
+		else
+			hlist_add_head_rcu(&sk->sk_node, &ilb->head);
+		inet_hash2(hashinfo, sk);
+		ilb->count++;
+		sock_set_flag(sk, SOCK_RCU_FREE);
+		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+	unlock:
+		spin_unlock(&ilb->lock);
+	}
 	return err;
 }
 EXPORT_SYMBOL(__inet_hash);
 
+/**
+ * inet_hash inserts a socket into th inet hashtable
+ */
 int inet_hash(struct sock *sk)
 {
 	int err = 0;
 
 	if (sk->sk_state != TCP_CLOSE) {
+		//TODO : if this is in the fast path, we don't need bh_disable for per-cpu
 		local_bh_disable();
 		err = __inet_hash(sk, NULL);
 		local_bh_enable();
@@ -587,6 +806,9 @@ int inet_hash(struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(inet_hash);
 
+/**
+ * inet_unhash removes a socket from the inet hashtable
+ */
 void inet_unhash(struct sock *sk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
@@ -741,6 +963,11 @@ int inet_hash_connect(struct inet_timewait_death_row *death_row,
 {
 	u32 port_offset = 0;
 
+	if (sk->__sk_common.skc_sharded) {
+		printk("UNEXPECTED SHARDED CONNECT");
+		dump_stack();
+	}
+
 	if (!inet_sk(sk)->inet_num)
 		port_offset = inet_sk_port_offset(sk);
 	return __inet_hash_connect(death_row, sk, port_offset,
@@ -762,16 +989,17 @@ void inet_hashinfo_init(struct inet_hashinfo *h)
 }
 EXPORT_SYMBOL_GPL(inet_hashinfo_init);
 
-static void init_hashinfo_lhash2(struct inet_hashinfo *h)
+static void init_hashinfo_lhash2(struct inet_listen_hashbucket* lhash2, unsigned int* mask)
 {
 	int i;
 
-	for (i = 0; i <= h->lhash2_mask; i++) {
-		spin_lock_init(&h->lhash2[i].lock);
-		INIT_HLIST_HEAD(&h->lhash2[i].head);
-		h->lhash2[i].count = 0;
+	for (i = 0; i <= mask; i++) {
+		spin_lock_init(&lhash2[i].lock);
+		INIT_HLIST_HEAD(&lhash2[i].head);
+		lhash2[i].count = 0;
 	}
 }
+
 
 void __init inet_hashinfo2_init(struct inet_hashinfo *h, const char *name,
 				unsigned long numentries, int scale,
@@ -787,7 +1015,25 @@ void __init inet_hashinfo2_init(struct inet_hashinfo *h, const char *name,
 					    &h->lhash2_mask,
 					    low_limit,
 					    high_limit);
-	init_hashinfo_lhash2(h);
+	init_hashinfo_lhash2(h->lhash2, h->lhash2_mask);
+}
+
+void __init inet_sharded_hash2_init(struct inet_sharded_hash *h, const char *name,
+				unsigned long numentries, int scale,
+				unsigned long low_limit,
+				unsigned long high_limit)
+{
+	printk("Hash2 sharded init");
+	h->lhash2 = alloc_large_system_hash(name,
+					    sizeof(*h->lhash2),
+					    numentries,
+					    scale,
+					    0,
+					    NULL,
+					    &h->lhash2_mask,
+					    low_limit,
+					    high_limit);
+	init_hashinfo_lhash2(h->lhash2, h->lhash2_mask);
 }
 
 int inet_hashinfo2_init_mod(struct inet_hashinfo *h)
@@ -800,7 +1046,7 @@ int inet_hashinfo2_init_mod(struct inet_hashinfo *h)
 	/* INET_LHTABLE_SIZE must be a power of 2 */
 	BUG_ON(INET_LHTABLE_SIZE & h->lhash2_mask);
 
-	init_hashinfo_lhash2(h);
+	init_hashinfo_lhash2(h->lhash2, h->lhash2_mask);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(inet_hashinfo2_init_mod);

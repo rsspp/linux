@@ -761,6 +761,9 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 	case SO_REUSEADDR:
 		sk->sk_reuse = (valbool ? SK_CAN_REUSE : SK_NO_REUSE);
 		break;
+	case SO_SHARDED:
+		sk->sk_sharded = val;
+		break;
 	case SO_REUSEPORT:
 		sk->sk_reuseport = valbool;
 		break;
@@ -1264,6 +1267,10 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 
 	case SO_REUSEPORT:
 		v.val = sk->sk_reuseport;
+		break;
+
+	case SO_SHARDED:
+		v.val = sk->sk_sharded;
 		break;
 
 	case SO_KEEPALIVE:

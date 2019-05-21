@@ -94,6 +94,9 @@ static int tcp_v4_md5_hash_hdr(char *md5_hash, const struct tcp_md5sig_key *key,
 
 struct inet_hashinfo tcp_hashinfo;
 EXPORT_SYMBOL(tcp_hashinfo);
+//Now part of hashingo
+//DEFINE_PER_CPU(struct inet_sharded_hash, tcp_sharded_hash);
+//EXPORT_SYMBOL(tcp_sharded_hash);
 
 static u32 tcp_v4_init_seq(const struct sk_buff *skb)
 {
@@ -441,7 +444,11 @@ int tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 	int err;
 	struct net *net = dev_net(icmp_skb->dev);
 
-	sk = __inet_lookup_established(net, &tcp_hashinfo, iph->daddr,
+	sk = __inet_lookup_sharded_established(net, &tcp_hashinfo.sharded[this_cpu_off], iph->daddr,
+					       th->dest, iph->saddr, ntohs(th->source),
+					       inet_iif(icmp_skb), 0);
+	if (!sk)
+		sk = __inet_lookup_established(net, &tcp_hashinfo, iph->daddr,
 				       th->dest, iph->saddr, ntohs(th->source),
 				       inet_iif(icmp_skb), 0);
 	if (!sk) {
@@ -714,7 +721,13 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 		 * Incoming packet is checked with md5 hash with finding key,
 		 * no RST generated if md5 hash doesn't match.
 		 */
-		sk1 = __inet_lookup_listener(net, &tcp_hashinfo, NULL, 0,
+		sk1 = __inet_lookup_sharded_listener(net, &tcp_hashinfo.sharded[this_cpu_off], NULL, 0,
+					     ip_hdr(skb)->saddr,
+					     th->source, ip_hdr(skb)->daddr,
+					     ntohs(th->source), inet_iif(skb),
+					     tcp_v4_sdif(skb));
+		if (!sk1)
+			sk1 = __inet_lookup_listener(net, &tcp_hashinfo, NULL, 0,
 					     ip_hdr(skb)->saddr,
 					     th->source, ip_hdr(skb)->daddr,
 					     ntohs(th->source), inet_iif(skb),
@@ -1602,7 +1615,18 @@ int tcp_v4_early_demux(struct sk_buff *skb)
 	if (th->doff < sizeof(struct tcphdr) / 4)
 		return 0;
 
-	sk = __inet_lookup_established(dev_net(skb->dev), &tcp_hashinfo,
+	/* either
+	 * - we have special queues with direct, and we select the right hahs here,
+	 * - we have one local lookup first, then the global
+	 * - the sk contains multiple sk like reuse por
+	 * --> second choice for now
+	 **/
+	sk = __inet_lookup_sharded_established(dev_net(skb->dev), &tcp_hashinfo.sharded[this_cpu_off],
+				       iph->saddr, th->source,
+				       iph->daddr, ntohs(th->dest),
+				       skb->skb_iif, inet_sdif(skb));
+	if (!sk)
+		sk = __inet_lookup_established(dev_net(skb->dev), &tcp_hashinfo,
 				       iph->saddr, th->source,
 				       iph->daddr, ntohs(th->dest),
 				       skb->skb_iif, inet_sdif(skb));
@@ -2647,6 +2671,7 @@ static int __net_init tcp_sk_init(struct net *net)
 	cnt = tcp_hashinfo.ehash_mask + 1;
 	net->ipv4.tcp_death_row.sysctl_max_tw_buckets = cnt / 2;
 	net->ipv4.tcp_death_row.hashinfo = &tcp_hashinfo;
+
 
 	net->ipv4.sysctl_max_syn_backlog = max(128, cnt / 256);
 	net->ipv4.sysctl_tcp_sack = 1;

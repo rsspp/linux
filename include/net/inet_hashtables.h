@@ -119,6 +119,13 @@ struct inet_listen_hashbucket {
 /* This is for listening sockets, thus all sockets which possess wildcards. */
 #define INET_LHTABLE_SIZE	32	/* Yes, really, this is all you need. */
 
+struct inet_sharded_hash {
+	unsigned int			ehash_mask;
+	struct inet_ehash_bucket	*ehash;
+	unsigned int			lhash2_mask;
+	struct inet_listen_hashbucket	*lhash2;
+};
+
 struct inet_hashinfo {
 	/* This is for sockets with full identity only.  Sockets here will
 	 * always be without wildcards and will have the following invariant:
@@ -141,6 +148,9 @@ struct inet_hashinfo {
 	/* The 2nd listener table hashed by local port and address */
 	unsigned int			lhash2_mask;
 	struct inet_listen_hashbucket	*lhash2;
+
+	//Maybe keep the value here. But it must be per_cpu
+	struct inet_sharded_hash sharded[NR_CPUS];
 
 	/* All the above members are written once at bootup and
 	 * never written again _or_ are predominantly read-access.
@@ -167,6 +177,12 @@ inet_lhash2_bucket(struct inet_hashinfo *h, u32 hash)
 	return &h->lhash2[hash & h->lhash2_mask];
 }
 
+static inline struct inet_listen_hashbucket *
+inet_sharded_lhash2_bucket(struct inet_sharded_hash *h, u32 hash)
+{
+	return &h->lhash2[hash & h->lhash2_mask];
+}
+
 static inline struct inet_ehash_bucket *inet_ehash_bucket(
 	struct inet_hashinfo *hashinfo,
 	unsigned int hash)
@@ -174,12 +190,27 @@ static inline struct inet_ehash_bucket *inet_ehash_bucket(
 	return &hashinfo->ehash[hash & hashinfo->ehash_mask];
 }
 
+static inline struct inet_ehash_bucket *inet_ehash_sharded_bucket(
+	struct inet_sharded_hash *sharded_hash,
+	unsigned int hash)
+{
+	return &sharded_hash->ehash[hash & sharded_hash->ehash_mask];
+}
+
+
 static inline spinlock_t *inet_ehash_lockp(
 	struct inet_hashinfo *hashinfo,
 	unsigned int hash)
 {
 	return &hashinfo->ehash_locks[hash & hashinfo->ehash_locks_mask];
 }
+/*
+static inline spinlock_t *inet_ehash_shared_lockp(
+	struct inet_sharded_hash *sharded_hash,
+	unsigned int hash)
+{
+	return &sharded_hash->ehash_locks[hash & hashinfo->ehash_locks_mask];
+}*/
 
 int inet_ehash_locks_alloc(struct inet_hashinfo *hashinfo);
 
@@ -253,14 +284,26 @@ struct sock *__inet_lookup_listener(struct net *net,
 				    const unsigned short hnum,
 				    const int dif, const int sdif);
 
+struct sock *__inet_lookup_sharded_listener(struct net *net,
+				    struct inet_sharded_hash *shardedhash,
+				    struct sk_buff *skb, int doff,
+				    const __be32 saddr, const __be16 sport,
+				    const __be32 daddr,
+				    const unsigned short hnum,
+				    const int dif, const int sdif);
+
 static inline struct sock *inet_lookup_listener(struct net *net,
 		struct inet_hashinfo *hashinfo,
 		struct sk_buff *skb, int doff,
 		__be32 saddr, __be16 sport,
 		__be32 daddr, __be16 dport, int dif, int sdif)
 {
-	return __inet_lookup_listener(net, hashinfo, skb, doff, saddr, sport,
+	struct sock* sk = __inet_lookup_sharded_listener(net, &hashinfo->sharded[this_cpu_off], skb, doff, saddr, sport,
+		      daddr, ntohs(dport), dif, sdif);
+	if (! sk)
+		sk = __inet_lookup_listener(net, hashinfo, skb, doff, saddr, sport,
 				      daddr, ntohs(dport), dif, sdif);
+	return sk;
 }
 
 /* Socket demux engine toys. */
@@ -319,6 +362,11 @@ struct sock *__inet_lookup_established(struct net *net,
 				       const __be32 saddr, const __be16 sport,
 				       const __be32 daddr, const u16 hnum,
 				       const int dif, const int sdif);
+struct sock *__inet_lookup_sharded_established(struct net *net,
+				       struct inet_sharded_hash *sharded_hash,
+				       const __be32 saddr, const __be16 sport,
+				       const __be32 daddr, const u16 hnum,
+				       const int dif, const int sdif);
 
 static inline struct sock *
 	inet_lookup_established(struct net *net, struct inet_hashinfo *hashinfo,
@@ -326,8 +374,12 @@ static inline struct sock *
 				const __be32 daddr, const __be16 dport,
 				const int dif)
 {
-	return __inet_lookup_established(net, hashinfo, saddr, sport, daddr,
+	struct sock * sk = __inet_lookup_sharded_established(net, &hashinfo->sharded[this_cpu_off], saddr, sport, daddr,
+						 ntohs(dport), dif, 0);
+	if (!sk)
+		sk =__inet_lookup_established(net, hashinfo, saddr, sport, daddr,
 					 ntohs(dport), dif, 0);
+	return sk;
 }
 
 static inline struct sock *__inet_lookup(struct net *net,
@@ -340,15 +392,24 @@ static inline struct sock *__inet_lookup(struct net *net,
 {
 	u16 hnum = ntohs(dport);
 	struct sock *sk;
+	struct inet_sharded_hash* sharded_hash = &hashinfo->sharded[this_cpu_off];
 
-	sk = __inet_lookup_established(net, hashinfo, saddr, sport,
+	//TODO : maybe do this only on given queues
+	sk = __inet_lookup_sharded_established(net, sharded_hash, saddr, sport,
+				       daddr, hnum, dif, sdif);
+	if (!sk)
+		sk = __inet_lookup_established(net, hashinfo, saddr, sport,
 				       daddr, hnum, dif, sdif);
 	*refcounted = true;
 	if (sk)
 		return sk;
 	*refcounted = false;
-	return __inet_lookup_listener(net, hashinfo, skb, doff, saddr,
+	sk = __inet_lookup_sharded_listener(net, sharded_hash, skb, doff, saddr,
+					      sport, daddr, hnum, dif, sdif);
+	if (!sk)
+		sk = __inet_lookup_listener(net, hashinfo, skb, doff, saddr,
 				      sport, daddr, hnum, dif, sdif);
+	return sk;
 }
 
 static inline struct sock *inet_lookup(struct net *net,

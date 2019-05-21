@@ -91,7 +91,7 @@ nf_tproxy_get_sock_v4(struct net *net, struct sk_buff *skb,
 
 		switch (lookup_type) {
 		case NF_TPROXY_LOOKUP_LISTENER:
-			sk = inet_lookup_listener(net, &tcp_hashinfo, skb,
+				sk = inet_lookup_listener(net, &tcp_hashinfo, skb,
 						    ip_hdrlen(skb) +
 						      __tcp_hdrlen(hp),
 						    saddr, sport,

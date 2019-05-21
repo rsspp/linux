@@ -3912,7 +3912,7 @@ void __init tcp_init(void)
 		alloc_large_system_hash("TCP established",
 					sizeof(struct inet_ehash_bucket),
 					thash_entries,
-					17, /* one slot per 128 KB of memory */
+					18, /* one slot per 256 KB of memory */
 					0,
 					NULL,
 					&tcp_hashinfo.ehash_mask,
@@ -3927,7 +3927,7 @@ void __init tcp_init(void)
 		alloc_large_system_hash("TCP bind",
 					sizeof(struct inet_bind_hashbucket),
 					tcp_hashinfo.ehash_mask + 1,
-					17, /* one slot per 128 KB of memory */
+					17, /* one slot per 256 KB of memory */
 					0,
 					&tcp_hashinfo.bhash_size,
 					NULL,
@@ -3938,6 +3938,36 @@ void __init tcp_init(void)
 		spin_lock_init(&tcp_hashinfo.bhash[i].lock);
 		INIT_HLIST_HEAD(&tcp_hashinfo.bhash[i].chain);
 	}
+
+	//Allocate per-cpu sharded table
+	int cpu;
+	struct inet_sharded_hash* ct;
+	char buf[32];
+	for_each_possible_cpu(cpu) {
+		snprintf(buf, "TCP established CPU %d", cpu);
+		ct = &tcp_hashinfo.sharded[cpu];
+		ct->ehash =
+			alloc_large_system_hash(buf,
+					sizeof(struct inet_ehash_bucket),
+					thash_entries,
+					18, /* one slot per 256 KB of memory */
+					0,
+					NULL,
+					&ct->ehash_mask,
+					0,
+					thash_entries ? 0 : 512 * 1024);
+		for (i = 0; i <= ct->ehash_mask; i++)
+			INIT_HLIST_NULLS_HEAD(&ct->ehash[i].chain, i);
+
+		snprintf(buf, "tcp_listen_portaddr_hash CPU %d", cpu);
+
+		/*inet_sharded_hash2_init(ct, buf,
+			    thash_entries, 21,
+			    0, 64 * 1024);
+*/
+
+    }
+
 
 
 	cnt = tcp_hashinfo.ehash_mask + 1;
