@@ -1018,7 +1018,7 @@ void __init inet_hashinfo2_init(struct inet_hashinfo *h, const char *name,
 	init_hashinfo_lhash2(h->lhash2, h->lhash2_mask);
 }
 
-void __init inet_sharded_hash2_init(struct inet_sharded_hash *h, const char *name,
+void __init inet_hashinfo2_sharded_init(struct inet_sharded_hash *h, const char *name,
 				unsigned long numentries, int scale,
 				unsigned long low_limit,
 				unsigned long high_limit)

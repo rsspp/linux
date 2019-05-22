@@ -3888,6 +3888,10 @@ void __init tcp_init(void)
 	int max_rshare, max_wshare, cnt;
 	unsigned long limit;
 	unsigned int i;
+	int cpu;
+
+	struct inet_sharded_hash* ct;
+	char buf[32];
 
 	BUILD_BUG_ON(sizeof(struct tcp_skb_cb) >
 		     FIELD_SIZEOF(struct sk_buff, cb));
@@ -3940,11 +3944,8 @@ void __init tcp_init(void)
 	}
 
 	//Allocate per-cpu sharded table
-	int cpu;
-	struct inet_sharded_hash* ct;
-	char buf[32];
 	for_each_possible_cpu(cpu) {
-		snprintf(buf, "TCP established CPU %d", cpu);
+		snprintf(buf, 32, "TCP established CPU %d", cpu);
 		ct = &tcp_hashinfo.sharded[cpu];
 		ct->ehash =
 			alloc_large_system_hash(buf,
@@ -3959,12 +3960,12 @@ void __init tcp_init(void)
 		for (i = 0; i <= ct->ehash_mask; i++)
 			INIT_HLIST_NULLS_HEAD(&ct->ehash[i].chain, i);
 
-		snprintf(buf, "tcp_listen_portaddr_hash CPU %d", cpu);
-
-		/*inet_sharded_hash2_init(ct, buf,
+		snprintf(buf, 32, "tcp_listen_portaddr_hash CPU %d", cpu);
+		inet_hashinfo2_sharded_init(ct, buf,
 			    thash_entries, 21,
 			    0, 64 * 1024);
-*/
+
+		printk("Sharded CPU %d initialized\n",cpu);
 
     }
 
