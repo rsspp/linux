@@ -478,6 +478,8 @@ int __inet_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len,
 			goto out;
 	}
 
+	if (sk->sk_sharded != -1)
+		printk("SHARDED SOCKET %d BINDING!", sk->sk_sharded);
 	tb_id = l3mdev_fib_table_by_index(net, sk->sk_bound_dev_if) ? : tb_id;
 	chk_addr_ret = inet_addr_type_table(net, addr->sin_addr.s_addr, tb_id);
 
@@ -526,6 +528,7 @@ int __inet_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len,
 		      force_bind_address_no_port)) {
 		if (sk->sk_prot->get_port(sk, snum)) {
 			inet->inet_saddr = inet->inet_rcv_saddr = 0;
+			printk("Double here 21\n");
 			err = -EADDRINUSE;
 			goto out_release_sock;
 		}

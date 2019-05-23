@@ -1200,6 +1200,7 @@ int sock_create_lite(int family, int type, int protocol, struct socket **res)
 	}
 
 	sock->type = type;
+
 	err = security_socket_post_create(sock, family, type, protocol, 1);
 	if (err)
 		goto out_release;
@@ -1707,6 +1708,8 @@ int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
+	//Todo maybe this is the responsability of sock?
+	//newsock->sk->sk_sharded = sock->sk->sk_sharded;
 
 	/*
 	 * We don't need try_module_get here, as the listening socket (sock)

@@ -503,11 +503,13 @@ begin:
 			continue;
 		if (likely(INET_MATCH(sk, net, acookie,
 				      saddr, daddr, ports, dif, sdif))) {
+			//Todo : we may ake this lock non atoic in sharded
 			if (unlikely(!refcount_inc_not_zero(&sk->sk_refcnt)))
 				goto out;
 			if (unlikely(!INET_MATCH(sk, net, acookie,
 						 saddr, daddr, ports,
 						 dif, sdif))) {
+				//Also shard could keep this non atomic
 				sock_gen_put(sk);
 				goto begin;
 			}
@@ -642,7 +644,7 @@ bool inet_ehash_insert(struct sock *sk, struct sock *osk)
 bool inet_ehash_sharded_insert(struct sock *sk, struct sock *osk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
-	struct inet_sharded_hash* sharded_hash = &sk->sk_prot->h.hashinfo->sharded[this_cpu_off];
+	struct inet_sharded_hash* sharded_hash = get_shard(sk->sk_prot->h.hashinfo);
 	struct hlist_nulls_head *list;
 	struct inet_ehash_bucket *head;
 	//spinlock_t *lock;
@@ -655,14 +657,14 @@ bool inet_ehash_sharded_insert(struct sock *sk, struct sock *osk)
 	list = &head->chain;
 	/*lock = inet_ehash_lockp(sharded_hash, sk->sk_hash);
 
-	spin_lock(lock);
+	spin_lock(lock);*/
 	if (osk) {
 		WARN_ON_ONCE(sk->sk_hash != osk->sk_hash);
 		ret = sk_nulls_del_node_init_rcu(osk);
 	}
 	if (ret)
 		__sk_nulls_add_node_rcu(sk, list);
-	spin_unlock(lock);*/
+	/*spin_unlock(lock);*/
 	return ret;
 }
 
@@ -728,7 +730,7 @@ int __inet_hash(struct sock *sk, struct sock *osk)
 	int err = 0;
 
 	if (sk->sk_sharded != -1) {
-		printk("COOL : calling inet_hash on a sharded socket");
+		printk("COOL : calling inet_hash on a sharded socket (for core %d)",sk->sk_sharded);
 		dump_stack();
 		if (sk->sk_state != TCP_LISTEN) {
 			inet_ehash_sharded_nolisten(sk, osk);
@@ -737,7 +739,7 @@ int __inet_hash(struct sock *sk, struct sock *osk)
 		WARN_ON(!sk_unhashed(sk));
 			//We keep a unique listening_hash. Indeed it's not used in the fast path.
 			ilb = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)];
-			struct inet_sharded_hash *sharded_hash = &sk->sk_prot->h.hashinfo->sharded[sk->sk_sharded];
+			struct inet_sharded_hash *sharded_hash = sk->sk_prot->h.hashinfo->sharded[sk->sk_sharded];
 
 			//Yeah !
 			//spin_lock(&ilb->lock);
@@ -755,10 +757,10 @@ int __inet_hash(struct sock *sk, struct sock *osk)
 			sock_set_flag(sk, SOCK_RCU_FREE);
 			sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 			//Re-yeah!
-			spin_unlock(&ilb->lock);
+			//spin_unlock(&ilb->lock);
 
 	} else {
-
+		printk("Non sharded socket...\n");
 		if (sk->sk_state != TCP_LISTEN) {
 			inet_ehash_nolisten(sk, osk);
 			return 0;
@@ -789,7 +791,7 @@ int __inet_hash(struct sock *sk, struct sock *osk)
 EXPORT_SYMBOL(__inet_hash);
 
 /**
- * inet_hash inserts a socket into th inet hashtable
+ * inet_hash inserts a socket into th inet hashtable. If it's a listen it will go to listen, else established
  */
 int inet_hash(struct sock *sk)
 {
@@ -859,6 +861,7 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 	static u32 hint;
 	int l3mdev;
 
+	printk("__inet_hash_connectt\n");
 	if (port) {
 		head = &hinfo->bhash[inet_bhashfn(net, port,
 						  hinfo->bhash_size)];
@@ -963,7 +966,7 @@ int inet_hash_connect(struct inet_timewait_death_row *death_row,
 {
 	u32 port_offset = 0;
 
-	if (sk->__sk_common.skc_sharded) {
+	if (sk->__sk_common.skc_sharded != -1) {
 		printk("UNEXPECTED SHARDED CONNECT");
 		dump_stack();
 	}
@@ -989,7 +992,7 @@ void inet_hashinfo_init(struct inet_hashinfo *h)
 }
 EXPORT_SYMBOL_GPL(inet_hashinfo_init);
 
-static void init_hashinfo_lhash2(struct inet_listen_hashbucket* lhash2, unsigned int* mask)
+static void init_hashinfo_lhash2(struct inet_listen_hashbucket* lhash2, unsigned int mask)
 {
 	int i;
 

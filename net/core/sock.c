@@ -762,6 +762,12 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 		sk->sk_reuse = (valbool ? SK_CAN_REUSE : SK_NO_REUSE);
 		break;
 	case SO_SHARDED:
+		if (val >= num_online_cpus() || val < -1) {
+			printk("SO_SHARDED on invalid CPU id %d\n",val);
+			ret = -EINVAL;
+			break;
+		}
+
 		sk->sk_sharded = val;
 		break;
 	case SO_REUSEPORT:
@@ -1674,6 +1680,7 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 		 */
 		sk->sk_prot = sk->sk_prot_creator = prot;
 		sk->sk_kern_sock = kern;
+		sk->sk_sharded = -1;
 		sock_lock_init(sk);
 		sk->sk_net_refcnt = kern ? 0 : 1;
 		if (likely(sk->sk_net_refcnt)) {

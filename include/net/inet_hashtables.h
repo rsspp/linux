@@ -150,7 +150,7 @@ struct inet_hashinfo {
 	struct inet_listen_hashbucket	*lhash2;
 
 	//Maybe keep the value here. But it must be per_cpu
-	struct inet_sharded_hash sharded[NR_CPUS];
+	struct inet_sharded_hash* sharded[NR_CPUS];
 
 	/* All the above members are written once at bootup and
 	 * never written again _or_ are predominantly read-access.
@@ -167,6 +167,8 @@ struct inet_hashinfo {
 	struct inet_listen_hashbucket	listening_hash[INET_LHTABLE_SIZE]
 					____cacheline_aligned_in_smp;
 };
+
+#define get_shard(hashinfo) ((hashinfo)->sharded[smp_processor_id()])
 
 #define inet_lhash2_for_each_icsk_rcu(__icsk, list) \
 	hlist_for_each_entry_rcu(__icsk, list, icsk_listen_portaddr_node)
@@ -276,6 +278,7 @@ int inet_hashinfo2_init_mod(struct inet_hashinfo *h);
 
 bool inet_ehash_insert(struct sock *sk, struct sock *osk);
 bool inet_ehash_nolisten(struct sock *sk, struct sock *osk);
+bool inet_ehash_sharded_nolisten(struct sock *sk, struct sock *osk);
 int __inet_hash(struct sock *sk, struct sock *osk);
 int inet_hash(struct sock *sk);
 void inet_unhash(struct sock *sk);
@@ -302,7 +305,7 @@ static inline struct sock *inet_lookup_listener(struct net *net,
 		__be32 saddr, __be16 sport,
 		__be32 daddr, __be16 dport, int dif, int sdif)
 {
-	struct sock* sk = __inet_lookup_sharded_listener(net, &hashinfo->sharded[this_cpu_off], skb, doff, saddr, sport,
+	struct sock* sk = __inet_lookup_sharded_listener(net, get_shard(hashinfo), skb, doff, saddr, sport,
 		      daddr, ntohs(dport), dif, sdif);
 	if (! sk)
 		sk = __inet_lookup_listener(net, hashinfo, skb, doff, saddr, sport,
@@ -378,7 +381,7 @@ static inline struct sock *
 				const __be32 daddr, const __be16 dport,
 				const int dif)
 {
-	struct sock * sk = __inet_lookup_sharded_established(net, &hashinfo->sharded[this_cpu_off], saddr, sport, daddr,
+	struct sock * sk = __inet_lookup_sharded_established(net, get_shard(hashinfo), saddr, sport, daddr,
 						 ntohs(dport), dif, 0);
 	if (!sk)
 		sk =__inet_lookup_established(net, hashinfo, saddr, sport, daddr,
@@ -396,7 +399,8 @@ static inline struct sock *__inet_lookup(struct net *net,
 {
 	u16 hnum = ntohs(dport);
 	struct sock *sk;
-	struct inet_sharded_hash* sharded_hash = &hashinfo->sharded[this_cpu_off];
+	//printk("__inet_lookup on cpu %d",smp_processor_id());
+	struct inet_sharded_hash* sharded_hash = get_shard(hashinfo);
 
 	//TODO : maybe do this only on given queues
 	sk = __inet_lookup_sharded_established(net, sharded_hash, saddr, sport,

@@ -49,6 +49,7 @@
 #include <linux/bpf-cgroup.h>
 
 extern struct inet_hashinfo tcp_hashinfo;
+extern DEFINE_PER_CPU(struct inet_sharded_hash, tcp_sharded_hash);
 
 extern struct percpu_counter tcp_orphan_count;
 void tcp_time_wait(struct sock *sk, int state, int timeo);

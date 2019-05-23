@@ -3946,7 +3946,8 @@ void __init tcp_init(void)
 	//Allocate per-cpu sharded table
 	for_each_possible_cpu(cpu) {
 		snprintf(buf, 32, "TCP established CPU %d", cpu);
-		ct = &tcp_hashinfo.sharded[cpu];
+		ct = per_cpu_ptr(&tcp_sharded_hash, cpu);
+		tcp_hashinfo.sharded[cpu] = ct;
 		ct->ehash =
 			alloc_large_system_hash(buf,
 					sizeof(struct inet_ehash_bucket),

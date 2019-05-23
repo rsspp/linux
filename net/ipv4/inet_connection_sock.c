@@ -138,6 +138,10 @@ static int inet_csk_bind_conflict(const struct sock *sk,
 	bool reuseport = !!sk->sk_reuseport && reuseport_ok;
 	kuid_t uid = sock_i_uid((struct sock *)sk);
 
+	//TODO : cleaner
+	printk("Sharded socket is never conflicting\n");
+	if (sk->sk_sharded)
+		return 0;
 	/*
 	 * Unlike other sk lookup places we do not check
 	 * for sk_net here, since _all_ the socks listed
@@ -901,6 +905,7 @@ int inet_csk_listen_start(struct sock *sk, int backlog)
 	}
 
 	inet_sk_set_state(sk, TCP_CLOSE);
+	printk("Double here 74\n");
 	return err;
 }
 EXPORT_SYMBOL_GPL(inet_csk_listen_start);

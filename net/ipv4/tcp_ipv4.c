@@ -94,9 +94,8 @@ static int tcp_v4_md5_hash_hdr(char *md5_hash, const struct tcp_md5sig_key *key,
 
 struct inet_hashinfo tcp_hashinfo;
 EXPORT_SYMBOL(tcp_hashinfo);
-//Now part of hashingo
-//DEFINE_PER_CPU(struct inet_sharded_hash, tcp_sharded_hash);
-//EXPORT_SYMBOL(tcp_sharded_hash);
+DEFINE_PER_CPU(struct inet_sharded_hash, tcp_sharded_hash);
+EXPORT_PER_CPU_SYMBOL(tcp_sharded_hash);
 
 static u32 tcp_v4_init_seq(const struct sk_buff *skb)
 {
@@ -444,7 +443,7 @@ int tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 	int err;
 	struct net *net = dev_net(icmp_skb->dev);
 
-	sk = __inet_lookup_sharded_established(net, &tcp_hashinfo.sharded[this_cpu_off], iph->daddr,
+	sk = __inet_lookup_sharded_established(net, this_cpu_ptr(&tcp_sharded_hash), iph->daddr,
 					       th->dest, iph->saddr, ntohs(th->source),
 					       inet_iif(icmp_skb), 0);
 	if (!sk)
@@ -721,7 +720,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 		 * Incoming packet is checked with md5 hash with finding key,
 		 * no RST generated if md5 hash doesn't match.
 		 */
-		sk1 = __inet_lookup_sharded_listener(net, &tcp_hashinfo.sharded[this_cpu_off], NULL, 0,
+		sk1 = __inet_lookup_sharded_listener(net, this_cpu_ptr(&tcp_sharded_hash), NULL, 0,
 					     ip_hdr(skb)->saddr,
 					     th->source, ip_hdr(skb)->daddr,
 					     ntohs(th->source), inet_iif(skb),
@@ -1490,9 +1489,14 @@ struct sock *tcp_v4_syn_recv_sock(const struct sock *sk, struct sk_buff *skb,
 	}
 #endif
 
+//	printk("Duplicating socket. Sharded : %d %d\n",sk->sk_sharded, newsk->sk_sharded);
+
 	if (__inet_inherit_port(sk, newsk) < 0)
 		goto put_and_exit;
-	*own_req = inet_ehash_nolisten(newsk, req_to_sk(req_unhash));
+	if (newsk->sk_sharded != -1)
+		*own_req = inet_ehash_sharded_nolisten(newsk, req_to_sk(req_unhash));
+	else
+		*own_req = inet_ehash_nolisten(newsk, req_to_sk(req_unhash));
 	if (likely(*own_req)) {
 		tcp_move_syn(newtp, req);
 		ireq->ireq_opt = NULL;
@@ -1621,10 +1625,12 @@ int tcp_v4_early_demux(struct sk_buff *skb)
 	 * - the sk contains multiple sk like reuse por
 	 * --> second choice for now
 	 **/
-	sk = __inet_lookup_sharded_established(dev_net(skb->dev), &tcp_hashinfo.sharded[this_cpu_off],
+	//printk(KERN_CRIT "That is %p on core %d\n", this_cpu_ptr(&tcp_sharded_hash), smp_processor_id());
+	sk = __inet_lookup_sharded_established(dev_net(skb->dev), this_cpu_ptr(&tcp_sharded_hash),
 				       iph->saddr, th->source,
 				       iph->daddr, ntohs(th->dest),
 				       skb->skb_iif, inet_sdif(skb));
+
 	if (!sk)
 		sk = __inet_lookup_established(dev_net(skb->dev), &tcp_hashinfo,
 				       iph->saddr, th->source,
