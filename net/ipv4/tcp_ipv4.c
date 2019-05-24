@@ -1630,12 +1630,17 @@ int tcp_v4_early_demux(struct sk_buff *skb)
 				       iph->saddr, th->source,
 				       iph->daddr, ntohs(th->dest),
 				       skb->skb_iif, inet_sdif(skb));
-
-	if (!sk)
+    if (sk)
+		__TCP_INC_STATS(sock_net(sk), TCP_MIB_SHARDED_HIT);
+    else {
 		sk = __inet_lookup_established(dev_net(skb->dev), &tcp_hashinfo,
 				       iph->saddr, th->source,
 				       iph->daddr, ntohs(th->dest),
 				       skb->skb_iif, inet_sdif(skb));
+		if (sk)
+			__TCP_INC_STATS(sock_net(sk), TCP_MIB_SINGLE_HIT);
+    }
+
 	if (sk) {
 		skb->sk = sk;
 		skb->destructor = sock_edemux;
@@ -2585,7 +2590,7 @@ struct proto tcp_prot = {
 	.recvmsg		= tcp_recvmsg,
 	.sendmsg		= tcp_sendmsg,
 	.sendpage		= tcp_sendpage,
-	.backlog_rcv		= tcp_v4_do_rcv,
+	.backlog_rcv	= tcp_v4_do_rcv,
 	.release_cb		= tcp_release_cb,
 	.hash			= inet_hash,
 	.unhash			= inet_unhash,

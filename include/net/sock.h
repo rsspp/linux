@@ -1720,6 +1720,9 @@ static inline void sock_put(struct sock *sk)
  */
 void sock_gen_put(struct sock *sk);
 
+
+void sock_gen_put_simple(struct sock *sk);
+
 int __sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested,
 		     unsigned int trim_cap, bool refcounted);
 static inline int sk_receive_skb(struct sock *sk, struct sk_buff *skb,

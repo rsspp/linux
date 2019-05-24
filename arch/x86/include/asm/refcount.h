@@ -94,6 +94,27 @@ static __always_inline __must_check bool refcount_dec_and_test(refcount_t *r)
 }
 
 static __always_inline __must_check
+bool simple_refcount_sub_and_test(unsigned int i, refcount_t *r)
+{
+	r->refs.counter -= i;
+	if (r->refs.counter == 0) {
+		return true;
+	}
+
+	return false;
+}
+
+static __always_inline __must_check bool simple_refcount_dec_and_test(refcount_t *r)
+{
+	if (--r->refs.counter == 0) {
+		return true;
+	}
+
+	return false;
+}
+
+
+static __always_inline __must_check
 bool refcount_add_not_zero(unsigned int i, refcount_t *r)
 {
 	int c, result;
@@ -122,5 +143,28 @@ static __always_inline __must_check bool refcount_inc_not_zero(refcount_t *r)
 {
 	return refcount_add_not_zero(1, r);
 }
+
+static __always_inline __must_check
+bool simple_refcount_add_not_zero(unsigned int i, refcount_t *r)
+{
+	int c;
+
+	c = r->refs.counter;
+
+    if (unlikely(c == 0 || c == INT_MAX))
+			return c != 0;
+
+    c = c + i;
+
+	r->refs.counter = c;
+
+	return c != 0;
+}
+
+static __always_inline __must_check bool simple_refcount_inc_not_zero(refcount_t *r)
+{
+	return simple_refcount_add_not_zero(1, r);
+}
+
 
 #endif

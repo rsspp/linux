@@ -985,8 +985,10 @@ static int ethtool_copy_validate_indir(u32 *indir, void __user *useraddr,
 
 	/* Validate ring indices */
 	for (i = 0; i < size; i++)
-		if (indir[i] >= rx_rings->data)
+		if (indir[i] >= rx_rings->data) {
+			printk("RXFH %d is bigger than ring size %d\n",indir[i], rx_rings->data);
 			return -EINVAL;
+		}
 
 	return 0;
 }
@@ -1261,8 +1263,10 @@ static noinline_for_stack int ethtool_set_rxfh(struct net_device *dev,
 	     rxfh.indir_size != dev_indir_size) ||
 	    (rxfh.key_size && (rxfh.key_size != dev_key_size)) ||
 	    (rxfh.indir_size == ETH_RXFH_INDIR_NO_CHANGE &&
-	     rxfh.key_size == 0 && rxfh.hfunc == ETH_RSS_HASH_NO_CHANGE))
+	     rxfh.key_size == 0 && rxfh.hfunc == ETH_RSS_HASH_NO_CHANGE)) {
+		printk("RSS must do something\n");
 		return -EINVAL;
+	}
 
 	if (rxfh.indir_size != ETH_RXFH_INDIR_NO_CHANGE)
 		indir_bytes = dev_indir_size * sizeof(indir[0]);

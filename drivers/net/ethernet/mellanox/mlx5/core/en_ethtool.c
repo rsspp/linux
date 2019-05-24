@@ -1124,6 +1124,7 @@ static int mlx5e_set_rxfh(struct net_device *dev, const u32 *indir,
 	if ((hfunc != ETH_RSS_HASH_NO_CHANGE) &&
 	    (hfunc != ETH_RSS_HASH_XOR) &&
 	    (hfunc != ETH_RSS_HASH_TOP))
+		printk("Unknown RSS func\n");
 		return -EINVAL;
 
 	in = kvzalloc(inlen, GFP_KERNEL);

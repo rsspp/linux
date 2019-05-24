@@ -69,6 +69,7 @@ struct xdp_buff {
 	void *data_meta;
 	void *data_hard_start;
 	unsigned long handle;
+	u32 hash;
 	struct xdp_rxq_info *rxq;
 };
 

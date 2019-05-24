@@ -426,6 +426,22 @@ void sock_gen_put(struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(sock_gen_put);
 
+void sock_gen_put_simple(struct sock *sk)
+{
+	if (!simple_refcount_dec_and_test(&sk->sk_refcnt))
+		return;
+
+	if (sk->sk_state == TCP_TIME_WAIT)
+		inet_twsk_free(inet_twsk(sk));
+	else if (sk->sk_state == TCP_NEW_SYN_RECV)
+		reqsk_free(inet_reqsk(sk));
+	else
+		sk_free(sk);
+}
+EXPORT_SYMBOL_GPL(sock_gen_put_simple);
+
+
+
 void sock_edemux(struct sk_buff *skb)
 {
 	sock_gen_put(skb->sk);
@@ -503,16 +519,17 @@ begin:
 			continue;
 		if (likely(INET_MATCH(sk, net, acookie,
 				      saddr, daddr, ports, dif, sdif))) {
-			//Todo : we may ake this lock non atoic in sharded
-			if (unlikely(!refcount_inc_not_zero(&sk->sk_refcnt)))
+			if (unlikely(!simple_refcount_inc_not_zero(&sk->sk_refcnt)))
 				goto out;
 			if (unlikely(!INET_MATCH(sk, net, acookie,
 						 saddr, daddr, ports,
 						 dif, sdif))) {
 				//Also shard could keep this non atomic
-				sock_gen_put(sk);
+				sock_gen_put_simple(sk);
 				goto begin;
 			}
+/*		    if (sk->sk_sharded != smp_processor_id())
+		        printk(KERN_CRIT "Sharded socket accessed from unexpected core");*/
 			goto found;
 		}
 	}
@@ -526,6 +543,7 @@ begin:
 out:
 	sk = NULL;
 found:
+
 	return sk;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_sharded_established);
@@ -731,7 +749,6 @@ int __inet_hash(struct sock *sk, struct sock *osk)
 
 	if (sk->sk_sharded != -1) {
 		printk("COOL : calling inet_hash on a sharded socket (for core %d)",sk->sk_sharded);
-		dump_stack();
 		if (sk->sk_state != TCP_LISTEN) {
 			inet_ehash_sharded_nolisten(sk, osk);
 			return 0;

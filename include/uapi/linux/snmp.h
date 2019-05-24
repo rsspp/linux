@@ -140,6 +140,8 @@ enum
 	TCP_MIB_INERRS,				/* InErrs */
 	TCP_MIB_OUTRSTS,			/* OutRsts */
 	TCP_MIB_CSUMERRORS,			/* InCsumErrors */
+	TCP_MIB_SHARDED_HIT,			/* SharedHit */
+	TCP_MIB_SINGLE_HIT,			/* SingleHit */
 	__TCP_MIB_MAX
 };
 
