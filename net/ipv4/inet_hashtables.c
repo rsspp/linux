@@ -878,7 +878,6 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 	static u32 hint;
 	int l3mdev;
 
-	printk("__inet_hash_connectt\n");
 	if (port) {
 		head = &hinfo->bhash[inet_bhashfn(net, port,
 						  hinfo->bhash_size)];

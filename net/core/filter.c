@@ -7212,6 +7212,11 @@ static u32 xdp_convert_ctx_access(enum bpf_access_type type,
 				      si->dst_reg, si->src_reg,
 				      offsetof(struct xdp_buff, data_end));
 		break;
+    case offsetof(struct xdp_md, hash):
+		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct xdp_buff, hash),
+				      si->dst_reg, si->src_reg,
+				      offsetof(struct xdp_buff, hash));
+		break;
 	case offsetof(struct xdp_md, ingress_ifindex):
 		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct xdp_buff, rxq),
 				      si->dst_reg, si->src_reg,
