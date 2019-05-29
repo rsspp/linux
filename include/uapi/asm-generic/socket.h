@@ -118,6 +118,7 @@
 #define SO_SNDTIMEO_NEW         67
 
 #define SO_SHARDED			68
+#define SO_AUTOMIGRATE			69
 
 #if !defined(__KERNEL__)
 

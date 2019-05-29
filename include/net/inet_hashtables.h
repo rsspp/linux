@@ -369,11 +369,11 @@ struct sock *__inet_lookup_established(struct net *net,
 				       const __be32 saddr, const __be16 sport,
 				       const __be32 daddr, const u16 hnum,
 				       const int dif, const int sdif);
-struct sock *__inet_lookup_sharded_established(struct net *net,
+/*struct sock *__inet_lookup_sharded_established(struct net *net,
 				       struct inet_sharded_hash *sharded_hash,
 				       const __be32 saddr, const __be16 sport,
 				       const __be32 daddr, const u16 hnum,
-				       const int dif, const int sdif);
+				       const int dif, const int sdif);*/
 
 static inline struct sock *
 	inet_lookup_established(struct net *net, struct inet_hashinfo *hashinfo,
@@ -381,10 +381,10 @@ static inline struct sock *
 				const __be32 daddr, const __be16 dport,
 				const int dif)
 {
-	struct sock * sk = __inet_lookup_sharded_established(net, get_shard(hashinfo), saddr, sport, daddr,
+	/*struct sock * sk = __inet_lookup_sharded_established(net, get_shard(hashinfo), saddr, sport, daddr,
 						 ntohs(dport), dif, 0);
-	if (!sk)
-		sk =__inet_lookup_established(net, hashinfo, saddr, sport, daddr,
+	if (!sk)*/
+	struct sock * sk =__inet_lookup_established(net, hashinfo, saddr, sport, daddr,
 					 ntohs(dport), dif, 0);
 	return sk;
 }
@@ -403,9 +403,9 @@ static inline struct sock *__inet_lookup(struct net *net,
 	struct inet_sharded_hash* sharded_hash = get_shard(hashinfo);
 
 	//TODO : maybe do this only on given queues
-	sk = __inet_lookup_sharded_established(net, sharded_hash, saddr, sport,
+	/*sk = __inet_lookup_sharded_established(net, sharded_hash, saddr, sport,
 				       daddr, hnum, dif, sdif);
-	if (!sk)
+	if (!sk)*/
 		sk = __inet_lookup_established(net, hashinfo, saddr, sport,
 				       daddr, hnum, dif, sdif);
 	*refcounted = true;

@@ -179,6 +179,7 @@ struct sock_common {
 	unsigned char		skc_reuseport:1;
 	unsigned char		skc_ipv6only:1;
 	unsigned char		skc_net_refcnt:1;
+	unsigned char		skc_automigrate:1;
 	int			skc_sharded;
 	int			skc_bound_dev_if;
 	union {
@@ -353,6 +354,7 @@ struct sock {
 #define sk_reuse		__sk_common.skc_reuse
 #define sk_reuseport		__sk_common.skc_reuseport
 #define sk_sharded		__sk_common.skc_sharded
+#define sk_automigrate		__sk_common.skc_automigrate
 #define sk_ipv6only		__sk_common.skc_ipv6only
 #define sk_net_refcnt		__sk_common.skc_net_refcnt
 #define sk_bound_dev_if		__sk_common.skc_bound_dev_if

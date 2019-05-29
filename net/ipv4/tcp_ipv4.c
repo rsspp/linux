@@ -443,10 +443,10 @@ int tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 	int err;
 	struct net *net = dev_net(icmp_skb->dev);
 
-	sk = __inet_lookup_sharded_established(net, this_cpu_ptr(&tcp_sharded_hash), iph->daddr,
+	/*sk = __inet_lookup_sharded_established(net, this_cpu_ptr(&tcp_sharded_hash), iph->daddr,
 					       th->dest, iph->saddr, ntohs(th->source),
 					       inet_iif(icmp_skb), 0);
-	if (!sk)
+	if (!sk)*/
 		sk = __inet_lookup_established(net, &tcp_hashinfo, iph->daddr,
 				       th->dest, iph->saddr, ntohs(th->source),
 				       inet_iif(icmp_skb), 0);
@@ -1626,20 +1626,20 @@ int tcp_v4_early_demux(struct sk_buff *skb)
 	 * --> second choice for now
 	 **/
 	//printk(KERN_CRIT "That is %p on core %d\n", this_cpu_ptr(&tcp_sharded_hash), smp_processor_id());
-	sk = __inet_lookup_sharded_established(dev_net(skb->dev), this_cpu_ptr(&tcp_sharded_hash),
+	/*sk = __inet_lookup_sharded_established(dev_net(skb->dev), this_cpu_ptr(&tcp_sharded_hash),
 				       iph->saddr, th->source,
 				       iph->daddr, ntohs(th->dest),
 				       skb->skb_iif, inet_sdif(skb));
     if (sk)
 		__TCP_INC_STATS(sock_net(sk), TCP_MIB_SHARDED_HIT);
-    else {
+    else {*/
 		sk = __inet_lookup_established(dev_net(skb->dev), &tcp_hashinfo,
 				       iph->saddr, th->source,
 				       iph->daddr, ntohs(th->dest),
 				       skb->skb_iif, inet_sdif(skb));
 		if (sk)
 			__TCP_INC_STATS(sock_net(sk), TCP_MIB_SINGLE_HIT);
-    }
+   // }
 
 	if (sk) {
 		skb->sk = sk;
@@ -1814,9 +1814,8 @@ static void tcp_v4_fill_cb(struct sk_buff *skb, const struct iphdr *iph,
 }
 
 /*
- *	From tcp_input.c
+ *	Called via prot handler
  */
-
 int tcp_v4_rcv(struct sk_buff *skb)
 {
 	struct net *net = dev_net(skb->dev);
@@ -1854,6 +1853,9 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	th = (const struct tcphdr *)skb->data;
 	iph = ip_hdr(skb);
 lookup:
+	/*This will not lookup for the sk if it has already been found in early_demux
+	 * but will take care of reference handling no matter how.
+	 */
 	sk = __inet_lookup_skb(&tcp_hashinfo, skb, __tcp_hdrlen(th), th->source,
 			       th->dest, sdif, &refcounted);
 	if (!sk)

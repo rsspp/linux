@@ -140,9 +140,9 @@ static int inet_csk_bind_conflict(const struct sock *sk,
 
 	//TODO : cleaner
 	if (sk->sk_sharded != -1) {
-	    printk("Sharded socket is never conflicting\n");
+		printk("Sharded socket is never conflicting\n");
 		return 0;
-    }
+	}
 	/*
 	 * Unlike other sk lookup places we do not check
 	 * for sk_net here, since _all_ the socks listed

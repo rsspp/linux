@@ -1945,6 +1945,17 @@ static int tcp_inq_hint(struct sock *sk)
 	return inq;
 }
 
+void sk_check_cpu(struct sock *sk) {
+	if (sk->sk_automigrate && smp_processor_id() != sk->sk_incoming_cpu) {
+		printk("Migrating task %d from cpu %d to cpu %d\n",current->pid,smp_processor_id(),sk->sk_incoming_cpu);
+		if (!cpu_online(sk->sk_incoming_cpu)) {
+			printk("CPU is not online !\n");
+		} else {
+			set_cpus_allowed_ptr(current, cpumask_of(sk->sk_incoming_cpu));
+		}
+	}
+}
+
 /*
  *	This routine copies from a sock struct into the user buffer.
  *
@@ -2106,6 +2117,7 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int nonblock,
 		} else {
 			sk_wait_data(sk, &timeo, last);
 		}
+		sk_check_cpu(sk);
 
 		if ((flags & MSG_PEEK) &&
 		    (peek_seq - copied - urg_hole != tp->copied_seq)) {

@@ -462,8 +462,44 @@ struct sock *__inet_lookup_established(struct net *net,
 	 * have wildcards anyways.
 	 */
 	unsigned int hash = inet_ehashfn(net, daddr, hnum, saddr, sport);
-	unsigned int slot = hash & hashinfo->ehash_mask;
-	struct inet_ehash_bucket *head = &hashinfo->ehash[slot];
+
+	struct inet_sharded_hash *sharded_hash = get_shard(hashinfo);
+	unsigned int slot = hash & sharded_hash->ehash_mask;
+	struct inet_ehash_bucket *head = &sharded_hash->ehash[slot];
+	//Lookup per-core sharded first
+	{
+	begin_sharded:
+		sk_nulls_for_each_rcu(sk, node, &head->chain) {
+			if (sk->sk_hash != hash)
+				continue;
+			if (likely(INET_MATCH(sk, net, acookie,
+						  saddr, daddr, ports, dif, sdif))) {
+				if (unlikely(!simple_refcount_inc_not_zero(&sk->sk_refcnt)))
+					goto sharded_out;
+				if (unlikely(!INET_MATCH(sk, net, acookie,
+							 saddr, daddr, ports,
+							 dif, sdif))) {
+					//Also shard could keep this non atomic
+					sock_gen_put_simple(sk);
+					goto begin_sharded; //search next item
+				}
+	//		    if (sk->sk_sharded != smp_processor_id())
+	//		        printk(KERN_CRIT "Sharded socket accessed from unexpected core");
+				return sk;
+			}
+		}
+
+		if (get_nulls_value(node) != slot)
+			goto begin_sharded;
+
+
+	}
+	sharded_out:
+
+
+	 slot = hash & hashinfo->ehash_mask;
+	head = &hashinfo->ehash[slot];
+
 
 begin:
 	sk_nulls_for_each_rcu(sk, node, &head->chain) {
@@ -496,7 +532,7 @@ found:
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_established);
 
-struct sock *__inet_lookup_sharded_established(struct net *net,
+/*struct sock *__inet_lookup_sharded_established(struct net *net,
 				  struct inet_sharded_hash *sharded_hash,
 				  const __be32 saddr, const __be16 sport,
 				  const __be32 daddr, const u16 hnum,
@@ -506,9 +542,7 @@ struct sock *__inet_lookup_sharded_established(struct net *net,
 	const __portpair ports = INET_COMBINED_PORTS(sport, hnum);
 	struct sock *sk;
 	const struct hlist_nulls_node *node;
-	/* Optimize here for direct hit, only listening connections can
-	 * have wildcards anyways.
-	 */
+
 	unsigned int hash = inet_ehashfn(net, daddr, hnum, saddr, sport);
 	unsigned int slot = hash & sharded_hash->ehash_mask;
 	struct inet_ehash_bucket *head = &sharded_hash->ehash[slot];
@@ -528,16 +562,12 @@ begin:
 				sock_gen_put_simple(sk);
 				goto begin;
 			}
-/*		    if (sk->sk_sharded != smp_processor_id())
-		        printk(KERN_CRIT "Sharded socket accessed from unexpected core");*/
+//		    if (sk->sk_sharded != smp_processor_id())
+//		        printk(KERN_CRIT "Sharded socket accessed from unexpected core");
 			goto found;
 		}
 	}
-	/*
-	 * if the nulls value we got at the end of this lookup is
-	 * not the expected one, we must restart lookup.
-	 * We probably met an item that was moved to another chain.
-	 */
+
 	if (get_nulls_value(node) != slot)
 		goto begin;
 out:
@@ -547,7 +577,7 @@ found:
 	return sk;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_sharded_established);
-
+*/
 
 /* called with local bh disabled */
 static int __inet_check_established(struct inet_timewait_death_row *death_row,
