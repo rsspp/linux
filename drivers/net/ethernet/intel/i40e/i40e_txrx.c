@@ -2388,6 +2388,7 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 			xdp.data_hard_start = xdp.data -
 					      i40e_rx_offset(rx_ring);
 			xdp.data_end = xdp.data + size;
+			xdp.hash = le32_to_cpu(rx_desc->wb.qword0.hi_dword.rss);
 
 			skb = i40e_run_xdp(rx_ring, &xdp);
 		}

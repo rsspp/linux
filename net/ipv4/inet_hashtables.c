@@ -496,8 +496,7 @@ struct sock *__inet_lookup_established(struct net *net,
 	}
 	sharded_out:
 
-
-	 slot = hash & hashinfo->ehash_mask;
+	slot = hash & hashinfo->ehash_mask;
 	head = &hashinfo->ehash[slot];
 
 
