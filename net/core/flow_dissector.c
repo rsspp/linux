@@ -707,16 +707,21 @@ bool __skb_flow_bpf_dissect(struct bpf_prog *prog,
 	/* Pass parameters to the BPF program */
 	memset(flow_keys, 0, sizeof(*flow_keys));
 	cb->qdisc_cb.flow_keys = flow_keys;
+	flow_keys->n_proto = skb->protocol;
 	flow_keys->nhoff = skb_network_offset(skb);
 	flow_keys->thoff = flow_keys->nhoff;
 
 	bpf_compute_data_pointers((struct sk_buff *)skb);
+
+	preempt_disable();
 	result = BPF_PROG_RUN(prog, skb);
+	preempt_enable();
 
 	/* Restore state */
 	memcpy(cb, &cb_saved, sizeof(cb_saved));
 
-	flow_keys->nhoff = clamp_t(u16, flow_keys->nhoff, 0, skb->len);
+	flow_keys->nhoff = clamp_t(u16, flow_keys->nhoff,
+				   skb_network_offset(skb), skb->len);
 	flow_keys->thoff = clamp_t(u16, flow_keys->thoff,
 				   flow_keys->nhoff, skb->len);
 
