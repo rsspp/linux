@@ -528,7 +528,7 @@ int __inet_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len,
 		      force_bind_address_no_port)) {
 		if (sk->sk_prot->get_port(sk, snum)) {
 			inet->inet_saddr = inet->inet_rcv_saddr = 0;
-			printk("Double here 21\n");
+			//printk("Double here 21\n");
 			err = -EADDRINUSE;
 			goto out_release_sock;
 		}
