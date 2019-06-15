@@ -1039,6 +1039,8 @@ static inline bool sk_flush_backlog(struct sock *sk)
 
 int sk_wait_data(struct sock *sk, long *timeo, const struct sk_buff *skb);
 
+void sk_check_cpu(struct sock *sk);
+
 struct request_sock_ops;
 struct timewait_sock_ops;
 struct inet_hashinfo;

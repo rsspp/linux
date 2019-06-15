@@ -2455,6 +2455,19 @@ void __sk_flush_backlog(struct sock *sk)
 	spin_unlock_bh(&sk->sk_lock.slock);
 }
 
+void sk_check_cpu(struct sock *sk) {
+	if (sk->sk_automigrate && smp_processor_id() != sk->sk_incoming_cpu) {
+		printk("Migrating task %d from cpu %d to cpu %d\n",current->pid,smp_processor_id(),sk->sk_incoming_cpu);
+		if (!cpu_online(sk->sk_incoming_cpu)) {
+			printk("CPU is not online !\n");
+		} else {
+			set_cpus_allowed_ptr(current, cpumask_of(sk->sk_incoming_cpu));
+		}
+	}
+}
+
+
+
 /**
  * sk_wait_data - wait for data to arrive at sk_receive_queue
  * @sk:    sock to wait on

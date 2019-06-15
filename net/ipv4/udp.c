@@ -1483,6 +1483,8 @@ int __udp_enqueue_schedule_skb(struct sock *sk, struct sk_buff *skb)
 	if (!sock_flag(sk, SOCK_DEAD))
 		sk->sk_data_ready(sk);
 
+    sk_check_cpu(sk);
+
 	busylock_release(busy);
 	return 0;
 
@@ -1725,8 +1727,11 @@ try_again:
 	peeking = flags & MSG_PEEK;
 	off = sk_peek_offset(sk, flags);
 	skb = __skb_recv_udp(sk, flags, noblock, &peeked, &off, &err);
-	if (!skb)
+
+    sk_check_cpu(sk);
+    if (!skb)
 		return err;
+
 
 	ulen = udp_skb_len(skb);
 	copied = len;
