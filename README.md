@@ -4,7 +4,26 @@ This is a repository containing a modified version of the 5.1.5 Linux kernel to 
 - SO_AUTOMIGRATE allows to migrate a thread doing a read on a socket to the core where the last packet was received. Of course, this is to be used in a sharding context where all packets of the same flow are handled on the same core. With RSS++, flows may be migrated, and the thread will therefore migrate with it at its next read call.
 - SO_SHARDED allows to use per-core flow table. Unfortunately this did not lead to the improvements we wanted, because there are still thousands locks and source of contention in the kernel. Mostly, buffer recycling should be sharded too. Sadly, this is most of the modifications in this repository. The other features do not depend on SO_SHARDED though.
 
-You can obtain a patch using `git diff v5.1.5` 
+You can obtain a patch using `git diff v5.1.5` and try your luck on applying to other kernel versions.
+
+Compiling
+---------
+All features are built-in. Just compile the Kernel as you would normally do:
+- Configure your options, eg with you may copy the config file in /boot/configXXX to .config and then type "make olddefconfig". This worked with Ubuntu 18.04 for us
+- make bzImage && make modules
+- sudo make modules install && sudo make install
+- sudo reboot
+
+Usage
+-----
+Options are used as any other socket option:
+```
+int migrate = 1;
+setsockopt( fd, SOL_SOCKET, SO_AUTOMIGRATE, &migrate, sizeof(migrate) ))
+```
+
+See the iPerf2 modified version for a complete sample.  
+
 
 Original README
 ===============
