@@ -12,9 +12,9 @@ Compiling
 ---------
 All features are built-in. Just compile the Kernel as you would normally do:
 - Configure your options, eg with you may copy the config file in /boot/configXXX to .config and then type "make olddefconfig". This worked with Ubuntu 18.04 for us
-- make bzImage && make modules
-- sudo make modules install && sudo make install
-- sudo reboot
+- `make bzImage && make modules`
+- `sudo make modules install && sudo make install`
+- `sudo reboot`
 
 Usage
 -----
