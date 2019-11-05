@@ -10,7 +10,7 @@ You can obtain a patch using `git diff v5.1.5` and try your luck on applying to 
 
 Compiling
 ---------
-All features are built-in. Just compile the Kernel as you would normally do. A full tutorial for Ubuntu is available at [https://wiki.ubuntu.com/Kernel/BuildYourOwnKernel]. But these few steps should guide you through a faster compilation and installation if you use Ubuntu 18.04:
+All features are built-in. Just compile the Kernel as you would normally do. A full tutorial for Ubuntu is available at https://wiki.ubuntu.com/Kernel/BuildYourOwnKernel. But these few steps should guide you through a faster compilation and installation if you use Ubuntu 18.04:
 - Install dependencis with `sudo apt install build-essential libncurses5-dev flex bison openssl libssl-dev libelf-dev libudev-dev libpci-dev libiberty-dev autoconf`
 - Configure your options, eg with you may copy the config file in /boot/configXXX to .config and then use "make olddefconfig" to upgrade the configuration to 5.1.5: `cp /boot/config-$(uname -r) .config && make olddefconfig`
 - `make bzImage && make modules`
